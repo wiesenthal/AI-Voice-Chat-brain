@@ -3,7 +3,7 @@ const https = require('https');
 const { createParser } = require('eventsource-parser');
 const cors = require('cors');
 const fs = require('fs');
-require('dotenv').config();
+// require('dotenv').config();
 
 const app = express();
 app.use(cors());
@@ -13,7 +13,6 @@ const sys_prompt = fs.readFileSync('prompt.txt', 'utf8');
 const preloaded_message_history = JSON.parse(fs.readFileSync('preloaded_message_history.json', 'utf8'));
 
 function generatePrompt(prompt, message_history = []) {
-    console.log(sys_prompt);
 
     prompt_messages = [
         { role: "system", content: sys_prompt },
@@ -21,7 +20,6 @@ function generatePrompt(prompt, message_history = []) {
         ...message_history,
         { role: "user", content: `${prompt}` },
     ]
-    console.log(prompt_messages);
 
     return prompt_messages;
 }
@@ -34,7 +32,7 @@ app.post('/ask', async (req, res) => {
         return;
     }
 
-    console.log(text);
+    console.log(`Received text: ${text}`);
 
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
     res.setHeader('Transfer-Encoding', 'chunked');
@@ -54,7 +52,7 @@ app.post('/ask', async (req, res) => {
             if (event.type === 'event') {
                 if (event.data !== "[DONE]") {
                     const txt = JSON.parse(event.data).choices[0].delta?.content || "" + "\n";
-                    console.log(txt);
+                    console.log(`Received word from GPT: ${txt}`);
                     res.write(txt);
                 }
                 else {
@@ -79,8 +77,11 @@ app.post('/ask', async (req, res) => {
         console.error(error);
     });
 
+    MODEL = "gpt-4";
+
+
     reqHttps.write(JSON.stringify({
-        model: "gpt-3.5-turbo",
+        model: MODEL,
         messages: generatePrompt(text, message_history),
         stream: true,
         n: 1,
