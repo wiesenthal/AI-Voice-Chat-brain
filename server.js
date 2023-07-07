@@ -1,20 +1,24 @@
-const express = require('express');
-const https = require('https');
-const { createParser } = require('eventsource-parser');
-const cors = require('cors');
-const fs = require('fs');
-// require('dotenv').config();
+import express, { json } from 'express';
+import { request } from 'https';
+import { createParser } from 'eventsource-parser';
+import cors from 'cors';
+import { readFileSync } from 'fs';
+
+import dotenv from 'dotenv';
+dotenv.config();
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+app.use(json());
 
-const sys_prompt = fs.readFileSync('prompt.txt', 'utf8');
-const preloaded_message_history = JSON.parse(fs.readFileSync('preloaded_message_history.json', 'utf8'));
+const MODEL = "gpt-4";
+
+const sys_prompt = readFileSync('prompt.txt', 'utf8');
+const preloaded_message_history = JSON.parse(readFileSync('preloaded_message_history.json', 'utf8'));
 
 function generatePrompt(prompt, message_history = []) {
 
-    prompt_messages = [
+    let prompt_messages = [
         { role: "system", content: sys_prompt },
         ...preloaded_message_history,
         ...message_history,
@@ -47,8 +51,9 @@ app.post('/ask', async (req, res) => {
         }
     };
 
-    const reqHttps = https.request(options, (response) => {
+    const reqHttps = request(options, (response) => {
         const parser = createParser((event) => {
+            console.log(`Received event: ${event.type}`);
             if (event.type === 'event') {
                 if (event.data !== "[DONE]") {
                     const txt = JSON.parse(event.data).choices[0].delta?.content || "" + "\n";
@@ -60,10 +65,20 @@ app.post('/ask', async (req, res) => {
                 }
             } else if (event.type === 'done') {
                 res.end();
+            } else {
+                console.log(`Received unknown event: ${event}`);
             }
         });
 
         response.on('data', (data) => {
+
+            // above fails if the response is not JSON, make it safe
+            if (data.toString().replace(/\s+/g,'').startsWith('{"error"')) {
+                console.error(`Received error from GPT: ${data.toString()}`);
+                res.end();
+                return;
+            }
+
             parser.feed(data.toString());
         });
 
@@ -77,9 +92,7 @@ app.post('/ask', async (req, res) => {
         console.error(error);
     });
 
-    MODEL = "gpt-4";
-
-
+    console.log(`Sending data to GPT: ${text}`);
     reqHttps.write(JSON.stringify({
         model: MODEL,
         messages: generatePrompt(text, message_history),
