@@ -1,43 +1,48 @@
 import MessageHistory from '../models/MessageHistory.js';
 
-export function getMessageHistoryForUser(req, userID) {
+const messageHistoryDict = {}
+
+
+const cancelledCommandsDict = {}
+
+export function getMessageHistoryForUser(userID) {
     // get message history from the session
-    if (req.session.messageHistory === undefined) {
+    if (messageHistoryDict[userID] === undefined) {
         // TODO: load message history from database
         // if message history not in database
-        req.session.messageHistory = [];
+        messageHistoryDict[userID] = new MessageHistory();
         // TODO: add message history to database
     }
-    let messageHistory = new MessageHistory(req.session.messageHistory);
 
-    return messageHistory;
+    return messageHistoryDict[userID];
 }
 
-export function storeMessageHistoryForUser(req, userID, messageHistory) {
+export function storeMessageHistoryForUser(userID, messageHistory) {
     // store message history in the session
-    req.session.messageHistory = messageHistory.messageHistory;
+    messageHistoryDict[userID] = messageHistory;
     // TODO: store message history in the database
 }
 
-export function addToCancelledCommands(req, commandID) {
-    // remove command from the session
-    if (req.session.cancelled_commands === undefined) {
-        req.session.cancelled_commands = [commandID];
-        console.log('Had to create cancelled_commands: ', req.session.cancelled_commands);
+export function addToCancelledCommands(userID, commandID) {
+    if (cancelledCommandsDict[userID] === undefined) {
+        cancelledCommandsDict[userID] = [commandID];
+        console.log('Had to create cancelled_commands: ', cancelledCommandsDict);
     }
     else {
-        req.session.cancelled_commands.push(commandID);
+        cancelledCommandsDict[userID].push(commandID);
         console.log(`New command cancelled: ${commandID}`)
-        console.log('Cancelled_commands: ', req.session.cancelled_commands);
+        console.log('Cancelled_commands: ', cancelledCommandsDict);
     }
 }
 
-export function isCommandCancelled(req, commandID) {
+export function isCommandCancelled(userID, commandID) {
     // check if command is in the session
-    if (req.session.cancelled_commands === undefined) {
+    if (cancelledCommandsDict[userID] === undefined) {
+        console.log(`Command ${commandID} is not in cancelled_commands`);
         return false;
     }
     else {
-        return req.session.cancelled_commands.includes(commandID);
+        console.log(`Command ${commandID} is in cancelled_commands`);
+        return true;
     }
 }

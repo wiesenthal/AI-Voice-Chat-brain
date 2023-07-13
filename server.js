@@ -1,7 +1,6 @@
 import express, { json } from 'express';
 import { request } from 'https';
 import { createParser } from 'eventsource-parser';
-import session from 'express-session';
 import cors from 'cors';
 
 import dotenv from 'dotenv';
@@ -10,17 +9,9 @@ import { getMessageHistoryForUser, storeMessageHistoryForUser, addToCancelledCom
 
 dotenv.config();
 
-const sessionMiddleware = session({
-    secret: process.env.SESSION_SECRET_KEY,
-    resave: false,
-    saveUninitialized: false,
-    cookie: { secure: false, httpOnly: true, sameSite: true }
-});
-
 const app = express();
 app.use(cors());
 app.use(json());
-app.use(sessionMiddleware);
 
 const MODEL = "gpt-3.5-turbo-16k";
 
@@ -30,7 +21,8 @@ app.post('/ask', async (req, res) => {
 
     const receiveTimestamp = Date.now();
 
-    const messageHistory = getMessageHistoryForUser(req, userID);
+    const messageHistory = getMessageHistoryForUser(userID);
+    console.log(`Got message history for user ${userID}, messageHistory: `, messageHistory);
 
     let collectedResponse = "";
 
@@ -89,11 +81,10 @@ app.post('/ask', async (req, res) => {
 
         response.on('end', () => {
             // if command is not cancelled, store the message history
-            if (!isCommandCancelled(req, userID, commandID)) {
+            if (!isCommandCancelled(userID, commandID)) {
                 messageHistory.setMessage("user", text, commandID, receiveTimestamp);
                 messageHistory.setMessage("assistant", collectedResponse, commandID, Date.now());
-                console.log(`Storing message history for user ${userID}, messageHistory: `, messageHistory);
-                storeMessageHistoryForUser(req, userID, messageHistory);
+                storeMessageHistoryForUser(userID, messageHistory);
             }
             else {
                 console.log(`Command ${commandID} was cancelled, not storing message history, `);
@@ -121,6 +112,12 @@ app.post('/ask', async (req, res) => {
     reqHttps.end();
 });
 
+app.post('/clearHistory', async (req, res) => {
+    let { user } = req.body;
+    // should happen on a user disconnect
+    // TODO: Should clear the message history from memory and make sure it is backed up in DB
+});
+
 app.post('/cancelMessage', async (req, res) => {
     let { user, commandID } = req.body;
 
@@ -132,14 +129,14 @@ app.post('/cancelMessage', async (req, res) => {
     console.log(`Received cancel message for user ${user} and commandID ${commandID}`);
     // ideally should also cancel the request to openai
 
-    addToCancelledCommands(req, user, commandID);
+    addToCancelledCommands(user, commandID);
 
-    const messageHistory = getMessageHistoryForUser(req, user);
+    const messageHistory = getMessageHistoryForUser(user);
 
     console.log('Old message history: ', messageHistory);
 
     messageHistory.removeMessages(commandID);
-    storeMessageHistoryForUser(req, user, messageHistory);
+    storeMessageHistoryForUser(user, messageHistory);
 
     console.log('New message history: ', messageHistory);
 
