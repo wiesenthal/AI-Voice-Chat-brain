@@ -1,35 +1,38 @@
 import express, { json } from 'express';
 import { request } from 'https';
 import { createParser } from 'eventsource-parser';
+import session from 'express-session';
 import cors from 'cors';
-import { readFileSync } from 'fs';
 
 import dotenv from 'dotenv';
+import { generatePrompt } from './utils/misc.js';
+import { getMessageHistoryForUser, storeMessageHistoryForUser, addToCancelledCommands, isCommandCancelled } from './utils/sessionUtils.js';
+
 dotenv.config();
+
+const sessionMiddleware = session({
+    secret: process.env.SESSION_SECRET_KEY,
+    resave: false,
+    saveUninitialized: false,
+    cookie: { secure: false, httpOnly: true, sameSite: true }
+});
 
 const app = express();
 app.use(cors());
 app.use(json());
+app.use(sessionMiddleware);
 
-const MODEL = "gpt-4";
+const MODEL = "gpt-3.5-turbo-16k";
 
-const sys_prompt = readFileSync('prompt.txt', 'utf8');
-const preloaded_message_history = JSON.parse(readFileSync('preloaded_message_history.json', 'utf8'));
-
-function generatePrompt(prompt, message_history = []) {
-
-    let prompt_messages = [
-        { role: "system", content: sys_prompt },
-        ...preloaded_message_history,
-        ...message_history,
-        { role: "user", content: `${prompt}` },
-    ]
-
-    return prompt_messages;
-}
-
+// I want to change this to use simply the user input and user ID (not messageHistory), loading message history from memory or database
 app.post('/ask', async (req, res) => {
-    let { text, message_history } = req.body;
+    let { text, userID, commandID } = req.body;
+
+    const receiveTimestamp = Date.now();
+
+    const messageHistory = getMessageHistoryForUser(req, userID);
+
+    let collectedResponse = "";
 
     if (text === undefined) {
         res.status(400).send("Bad Request");
@@ -58,12 +61,15 @@ app.post('/ask', async (req, res) => {
                 if (event.data !== "[DONE]") {
                     const txt = JSON.parse(event.data).choices[0].delta?.content || "" + "\n";
                     console.log(`Received word from GPT: ${txt}`);
+                    collectedResponse += txt;
                     res.write(txt);
                 }
                 else {
                     res.end();
                 }
             } else if (event.type === 'done') {
+                console.log('Received done event');
+                // I don't think this is ever called
                 res.end();
             } else {
                 console.log(`Received unknown event: ${event}`);
@@ -71,7 +77,6 @@ app.post('/ask', async (req, res) => {
         });
 
         response.on('data', (data) => {
-
             // above fails if the response is not JSON, make it safe
             if (data.toString().replace(/\s+/g,'').startsWith('{"error"')) {
                 console.error(`Received error from GPT: ${data.toString()}`);
@@ -83,6 +88,17 @@ app.post('/ask', async (req, res) => {
         });
 
         response.on('end', () => {
+            // if command is not cancelled, store the message history
+            if (!isCommandCancelled(req, userID, commandID)) {
+                messageHistory.setMessage("user", text, commandID, receiveTimestamp);
+                messageHistory.setMessage("assistant", collectedResponse, commandID, Date.now());
+                console.log(`Storing message history for user ${userID}, messageHistory: `, messageHistory);
+                storeMessageHistoryForUser(req, userID, messageHistory);
+            }
+            else {
+                console.log(`Command ${commandID} was cancelled, not storing message history, `);
+            }
+
             parser.reset();
             console.log('No more data in response.')
         });
@@ -93,14 +109,41 @@ app.post('/ask', async (req, res) => {
     });
 
     console.log(`Sending data to GPT: ${text}`);
+    const formattedMessages = messageHistory.getGPTFormattedMessages();
+    console.log(`Formatted message history: ${formattedMessages}`);
     reqHttps.write(JSON.stringify({
         model: MODEL,
-        messages: generatePrompt(text, message_history),
+        messages: generatePrompt(text, formattedMessages),
         stream: true,
         n: 1,
     }));
 
     reqHttps.end();
+});
+
+app.post('/cancelMessage', async (req, res) => {
+    let { user, commandID } = req.body;
+
+    if (user === undefined || commandID === undefined) {
+        res.status(400).send("Bad Request");
+        return;
+    }
+
+    console.log(`Received cancel message for user ${user} and commandID ${commandID}`);
+    // ideally should also cancel the request to openai
+
+    addToCancelledCommands(req, user, commandID);
+
+    const messageHistory = getMessageHistoryForUser(req, user);
+
+    console.log('Old message history: ', messageHistory);
+
+    messageHistory.removeMessages(commandID);
+    storeMessageHistoryForUser(req, user, messageHistory);
+
+    console.log('New message history: ', messageHistory);
+
+    res.status(200).send("OK");
 });
 
 const port = process.env.PORT || 2000;
