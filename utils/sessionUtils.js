@@ -43,11 +43,9 @@ export function addToCancelledCommands(userID, commandID) {
 export function isCommandCancelled(userID, commandID) {
     // check if command is in the session
     if (cancelledCommandsDict[userID] === undefined) {
-        console.log(`Command ${commandID} is not in cancelled_commands`);
         return false;
     }
     else {
-        console.log(`Command ${commandID} is in cancelled_commands`);
-        return true;
+        return cancelledCommandsDict[userID].includes(commandID);
     }
 }

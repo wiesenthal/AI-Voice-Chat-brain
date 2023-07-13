@@ -48,7 +48,6 @@ app.post('/ask', async (req, res) => {
 
     const reqHttps = request(options, (response) => {
         const parser = createParser((event) => {
-            console.log(`Received event: ${event.type}`);
             if (event.type === 'event') {
                 if (event.data !== "[DONE]") {
                     const txt = JSON.parse(event.data).choices[0].delta?.content || "" + "\n";
@@ -72,6 +71,13 @@ app.post('/ask', async (req, res) => {
             // above fails if the response is not JSON, make it safe
             if (data.toString().replace(/\s+/g,'').startsWith('{"error"')) {
                 console.error(`Received error from GPT: ${data.toString()}`);
+                res.end();
+                return;
+            }
+
+            if (isCommandCancelled(userID, commandID)) {
+                console.log(`Command ${commandID} was cancelled, ending response. `);
+                reqHttps.destroy();
                 res.end();
                 return;
             }
@@ -101,7 +107,6 @@ app.post('/ask', async (req, res) => {
 
     console.log(`Sending data to GPT: ${text}`);
     const formattedMessages = messageHistory.getGPTFormattedMessages();
-    console.log(`Formatted message history: ${formattedMessages}`);
     reqHttps.write(JSON.stringify({
         model: MODEL,
         messages: generatePrompt(text, formattedMessages),
@@ -121,16 +126,15 @@ app.post('/disconnect', async (req, res) => {
     res.status(200).send("OK");
 });
 
-app.post('/cancelMessage', async (req, res) => {
+app.post('/cancelCommand', async (req, res) => {
     let { userID, commandID } = req.body;
+
+    console.log(`Received cancel message for user ${userID} and commandID ${commandID}`);
 
     if (userID === undefined || commandID === undefined) {
         res.status(400).send("Bad Request");
         return;
     }
-
-    console.log(`Received cancel message for user ${userID} and commandID ${commandID}`);
-    // ideally should also cancel the request to openai
 
     addToCancelledCommands(userID, commandID);
 
