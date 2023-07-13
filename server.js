@@ -5,7 +5,7 @@ import cors from 'cors';
 
 import dotenv from 'dotenv';
 import { generatePrompt } from './utils/misc.js';
-import { getMessageHistoryForUser, storeMessageHistoryForUser, addToCancelledCommands, isCommandCancelled } from './utils/sessionUtils.js';
+import { getMessageHistoryForUser, storeMessageHistoryForUser, addToCancelledCommands, isCommandCancelled, clearLocalMessageHistoryForUser } from './utils/sessionUtils.js';
 
 dotenv.config();
 
@@ -112,31 +112,34 @@ app.post('/ask', async (req, res) => {
     reqHttps.end();
 });
 
-app.post('/clearHistory', async (req, res) => {
+app.post('/disconnect', async (req, res) => {
     let { user } = req.body;
     // should happen on a user disconnect
     // TODO: Should clear the message history from memory and make sure it is backed up in DB
+    console.log(`Received disconnect for user ${user}`);
+    clearLocalMessageHistoryForUser(user);
+    res.status(200).send("OK");
 });
 
 app.post('/cancelMessage', async (req, res) => {
-    let { user, commandID } = req.body;
+    let { userID, commandID } = req.body;
 
-    if (user === undefined || commandID === undefined) {
+    if (userID === undefined || commandID === undefined) {
         res.status(400).send("Bad Request");
         return;
     }
 
-    console.log(`Received cancel message for user ${user} and commandID ${commandID}`);
+    console.log(`Received cancel message for user ${userID} and commandID ${commandID}`);
     // ideally should also cancel the request to openai
 
-    addToCancelledCommands(user, commandID);
+    addToCancelledCommands(userID, commandID);
 
-    const messageHistory = getMessageHistoryForUser(user);
+    const messageHistory = getMessageHistoryForUser(userID);
 
     console.log('Old message history: ', messageHistory);
 
     messageHistory.removeMessages(commandID);
-    storeMessageHistoryForUser(user, messageHistory);
+    storeMessageHistoryForUser(userID, messageHistory);
 
     console.log('New message history: ', messageHistory);
 

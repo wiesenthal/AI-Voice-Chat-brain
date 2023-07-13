@@ -23,6 +23,11 @@ export function storeMessageHistoryForUser(userID, messageHistory) {
     // TODO: store message history in the database
 }
 
+export function clearLocalMessageHistoryForUser(userID) {
+    // clear message history from the session
+    messageHistoryDict[userID] = undefined;
+}
+
 export function addToCancelledCommands(userID, commandID) {
     if (cancelledCommandsDict[userID] === undefined) {
         cancelledCommandsDict[userID] = [commandID];
