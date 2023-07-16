@@ -1,19 +1,11 @@
-import MessageHistory from '../models/MessageHistory.js';
-
 const messageHistoryDict = {}
-
-
 const cancelledCommandsDict = {}
 
-export function getMessageHistoryForUser(userID) {
+export function getLocalMessageHistory(userID) {
     // get message history from the session
     if (messageHistoryDict[userID] === undefined) {
-        // TODO: load message history from database
-        // if message history not in database
-        messageHistoryDict[userID] = new MessageHistory();
-        // TODO: add message history to database
+        return null;
     }
-
     return messageHistoryDict[userID];
 }
 
@@ -27,6 +19,11 @@ export function clearLocalMessageHistoryForUser(userID) {
     // clear message history from the session
     messageHistoryDict[userID] = undefined;
 }
+
+export function getAllLocalMessageHistories() {
+    return messageHistoryDict;
+}
+
 
 export function addToCancelledCommands(userID, commandID) {
     if (cancelledCommandsDict[userID] === undefined) {

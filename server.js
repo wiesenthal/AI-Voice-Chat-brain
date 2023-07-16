@@ -5,7 +5,9 @@ import cors from 'cors';
 
 import dotenv from 'dotenv';
 import { generatePrompt } from './utils/misc.js';
-import { getMessageHistoryForUser, storeMessageHistoryForUser, addToCancelledCommands, isCommandCancelled, clearLocalMessageHistoryForUser } from './utils/sessionUtils.js';
+import { getLocalMessageHistory, storeMessageHistoryForUser, addToCancelledCommands, isCommandCancelled, clearLocalMessageHistoryForUser, getAllLocalMessageHistories } from './utils/sessionUtils.js';
+import MessageHistory from './models/MessageHistory.js';
+import { saveMessageHistoryToDB } from './utils/databaseUtils.js';
 
 dotenv.config();
 
@@ -15,13 +17,12 @@ app.use(json());
 
 const MODEL = "gpt-3.5-turbo-16k";
 
-// I want to change this to use simply the user input and user ID (not messageHistory), loading message history from memory or database
 app.post('/ask', async (req, res) => {
     let { text, userID, commandID } = req.body;
 
     const receiveTimestamp = Date.now();
 
-    const messageHistory = getMessageHistoryForUser(userID);
+    const messageHistory = await MessageHistory.load(userID);
     console.log(`Got message history for user ${userID}, messageHistory: `, messageHistory);
 
     let collectedResponse = "";
@@ -118,11 +119,18 @@ app.post('/ask', async (req, res) => {
 });
 
 app.post('/disconnect', async (req, res) => {
-    let { user } = req.body;
+    let { userID } = req.body;
     // should happen on a user disconnect
     // TODO: Should clear the message history from memory and make sure it is backed up in DB
-    console.log(`Received disconnect for user ${user}`);
-    clearLocalMessageHistoryForUser(user);
+    console.log(`Received disconnect for user ${userID}`);
+    const messageHistory = getLocalMessageHistory(userID);
+    if (!messageHistory) {
+        console.log(`Tried to save but no message history found for userID ${userID}`);
+        res.status(200).send("OK");
+        return;
+    }
+    saveMessageHistoryToDB(userID, messageHistory);
+    clearLocalMessageHistoryForUser(userID);
     res.status(200).send("OK");
 });
 
@@ -138,7 +146,7 @@ app.post('/cancelCommand', async (req, res) => {
 
     addToCancelledCommands(userID, commandID);
 
-    const messageHistory = getMessageHistoryForUser(userID);
+    const messageHistory = getLocalMessageHistory(userID);
 
     console.log('Old message history: ', messageHistory);
 
@@ -151,6 +159,25 @@ app.post('/cancelCommand', async (req, res) => {
 });
 
 const port = process.env.PORT || 2000;
-app.listen(port, () => {
+const server = app.listen(port, () => {
     console.log(`Server is running on port ${port}`);
 });
+
+// on server shutdown, save all message histories to DB
+for (let signal of ["SIGTERM", "SIGINT"])
+{
+    process.on(signal, () => {
+        console.log(`Received ${signal}, saving all message histories to DB`);
+        for (let [userID, messageHistory] of Object.entries(getAllLocalMessageHistories())) {
+            if (!messageHistory || !userID) {
+                console.log(`Tried to save but no message history found for userID ${userID}`);
+                continue;
+            }
+            saveMessageHistoryToDB(userID, messageHistory);
+        }
+        server.close((error) => {
+            console.log('Process terminated');
+            process.exit(error ? 1 : 0);
+        });
+    });
+}
