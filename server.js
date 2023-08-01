@@ -2,11 +2,11 @@ import express, { json } from 'express';
 import { request } from 'https';
 import { createParser } from 'eventsource-parser';
 import cors from 'cors';
+import { readFileSync } from 'fs';
 
 import dotenv from 'dotenv';
-import { generatePrompt } from './utils/misc.js';
-import { getLocalMessageHistory, storeMessageHistoryForUser, addToCancelledCommands, isCommandCancelled, clearLocalMessageHistoryForUser, getAllLocalMessageHistories } from './utils/sessionUtils.js';
 import MessageHistory from './models/MessageHistory.js';
+import SessionManager from './models/SessionManager.js';
 import { saveMessageHistoryToDB } from './utils/databaseUtils.js';
 
 dotenv.config();
@@ -17,12 +17,28 @@ app.use(json());
 
 const MODEL = "gpt-3.5-turbo-16k";
 
+const sysPrompt = readFileSync('prompt.txt', 'utf8');
+const preloadedMessageHistory = JSON.parse(readFileSync('preloadedMessageHistory.json', 'utf8'));
+
+const sessionManager = new SessionManager();
+
+function generatePrompt(prompt, messageHistory = []) {
+    let prompt_messages = [
+        { role: "system", content: sysPrompt },
+        ...preloadedMessageHistory,
+        ...messageHistory,
+        { role: "user", content: `${prompt}` },
+    ]
+
+    return prompt_messages;
+}
+
 app.post('/ask', async (req, res) => {
     let { text, userID, commandID } = req.body;
 
     const receiveTimestamp = Date.now();
 
-    const messageHistory = await MessageHistory.load(userID);
+    const messageHistory = await MessageHistory.load(userID, sessionManager);
     console.log(`Got message history for user ${userID}, messageHistory: `, messageHistory);
 
     let collectedResponse = "";
@@ -76,7 +92,7 @@ app.post('/ask', async (req, res) => {
                 return;
             }
 
-            if (isCommandCancelled(userID, commandID)) {
+            if (sessionManager.isCommandCancelled(userID, commandID)) {
                 console.log(`Command ${commandID} was cancelled, ending response. `);
                 reqHttps.destroy();
                 res.end();
@@ -88,10 +104,10 @@ app.post('/ask', async (req, res) => {
 
         response.on('end', () => {
             // if command is not cancelled, store the message history
-            if (!isCommandCancelled(userID, commandID)) {
+            if (!sessionManager.isCommandCancelled(userID, commandID)) {
                 messageHistory.setMessage("user", text, commandID, receiveTimestamp);
                 messageHistory.setMessage("assistant", collectedResponse, commandID, Date.now());
-                storeMessageHistoryForUser(userID, messageHistory);
+                sessionManager.storeMessageHistoryForUser(userID, messageHistory);
             }
             else {
                 console.log(`Command ${commandID} was cancelled, not storing message history, `);
@@ -123,14 +139,15 @@ app.post('/disconnect', async (req, res) => {
     // should happen on a user disconnect
     // TODO: Should clear the message history from memory and make sure it is backed up in DB
     console.log(`Received disconnect for user ${userID}`);
-    const messageHistory = getLocalMessageHistory(userID);
+    const messageHistory = sessionManager.getMessageHistoryForUser(userID);
     if (!messageHistory) {
         console.log(`Tried to save but no message history found for userID ${userID}`);
         res.status(200).send("OK");
         return;
     }
     saveMessageHistoryToDB(userID, messageHistory);
-    clearLocalMessageHistoryForUser(userID);
+    //clearLocalMessageHistoryForUser(userID);
+    sessionManager.clearSessionForUser(userID);
     res.status(200).send("OK");
 });
 
@@ -144,14 +161,14 @@ app.post('/cancelCommand', async (req, res) => {
         return;
     }
 
-    addToCancelledCommands(userID, commandID);
+    sessionManager.addToCancelledCommands(userID, commandID);
 
-    const messageHistory = getLocalMessageHistory(userID);
+    const messageHistory = sessionManager.getMessageHistoryForUser(userID);
 
     console.log('Old message history: ', messageHistory);
 
     messageHistory.removeMessages(commandID);
-    storeMessageHistoryForUser(userID, messageHistory);
+    sessionManager.storeMessageHistoryForUser(userID, messageHistory);
 
     console.log('New message history: ', messageHistory);
 
@@ -168,7 +185,7 @@ for (let signal of ["SIGTERM", "SIGINT"])
 {
     process.on(signal, () => {
         console.log(`Received ${signal}, saving all message histories to DB`);
-        for (let [userID, messageHistory] of Object.entries(getAllLocalMessageHistories())) {
+        for (let [userID, messageHistory] of Object.entries(sessionManager.getAllMessageHistories())) {
             if (!messageHistory || !userID) {
                 console.log(`Tried to save but no message history found for userID ${userID}`);
                 continue;

@@ -1,5 +1,4 @@
 import { getMessageListFromDB } from "../utils/databaseUtils.js";
-import { getLocalMessageHistory } from "../utils/sessionUtils.js";
 
 // This class should store and manage the message history for the orchestrator
 class MessageHistory {
@@ -31,16 +30,20 @@ class MessageHistory {
         });
     }
 
+    isEmpty() {
+        return this.messageHistory.length == 0;
+    }
+
     /**
      * Loads the message history for a user from the local session or the database, or creates a new message history
      * @param {string} userID
      * @returns {MessageHistory}
      */
-    static async load(userID) {
+    static async load(userID, sessionManager) {
         
         // check if message history is in the local session, if so use that
-        const messageHistory = getLocalMessageHistory(userID);
-        if (messageHistory != null) {
+        const messageHistory = sessionManager.getMessageHistoryForUser(userID);
+        if (messageHistory != null && !messageHistory.isEmpty()) {
             return messageHistory;
         }
         // if not, check if message history is in the database, if so use that
