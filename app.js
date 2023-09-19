@@ -15,6 +15,8 @@ class App {
         this.app = express();
         this.port = process.env.PORT || 2000;
         this.server = null;
+
+        this.alreadyKilled = false;
     }
 
     configureMiddleware() {
@@ -38,17 +40,23 @@ class App {
 
     catchKillSignal() {
         for (let signal of ["SIGTERM", "SIGINT"])
-        {
-            process.on(signal, () => {
+        { 
+            process.on(signal, async () => {
+                if (this.alreadyKilled) {
+                    console.log(`Received ${signal} again, ignoring so as to not duplicate message history.`);
+                    return;
+                }
+                this.alreadyKilled = true;
+
                 console.log(`Received ${signal}, saving all message histories to DB`);
                 for (let [userID, messageHistory] of Object.entries(SessionManager.getAllMessageHistories())) {
                     if (!messageHistory || !userID) {
                         console.log(`Tried to save but no message history found for userID ${userID}`);
                         continue;
                     }
-                    saveMessageHistoryToDB(userID, messageHistory);
+                    await saveMessageHistoryToDB(userID, messageHistory);
                 }
-                server.close((error) => {
+                this.server.close((error) => {
                     console.log('Process terminated');
                     process.exit(error ? 1 : 0);
                 });

@@ -12,7 +12,7 @@ class DisconnectController {
             res.status(200).send("OK");
             return;
         }
-        saveMessageHistoryToDB(userID, messageHistory);
+        await saveMessageHistoryToDB(userID, messageHistory);
         SessionManager.clearSessionForUser(userID);
         res.status(200).send("OK");
     }

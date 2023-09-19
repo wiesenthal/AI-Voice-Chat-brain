@@ -44,11 +44,14 @@ class MessageHistory {
         // check if message history is in the local session, if so use that
         const messageHistory = sessionManager.getMessageHistoryForUser(userID);
         if (messageHistory != null && !messageHistory.isEmpty()) {
+            console.log(`Loaded message history from session for user ${userID}`);
             return messageHistory;
         }
         // if not, check if message history is in the database, if so use that
+        console.log(`Message history not found in session for user ${userID}, checking database`);
         const messageList = await getMessageListFromDB(userID);
         if (messageList != null) {
+            console.log(`Loaded message history from database for user ${userID}`, messageList);
             return new MessageHistory(messageList);
         }
 

@@ -33,20 +33,24 @@ export async function getMessageListFromDB(userID) {
     });
 }
 
-export function saveMessageHistoryToDB(userID, messageHistory) {
+export async function saveMessageHistoryToDB(userID, messageHistory) {
     // delete all messages from the user
     try {
-        dbQueryPool.execute('DELETE FROM messages WHERE user_id = ?;', [userID]);
+        await dbQueryPool.execute('DELETE FROM messages WHERE user_id = ?;', [userID]);
+        console.log(`Deleted all messages from database for user ${userID}`);
     }
     catch (err) {
         console.error(err);
     }
 
     try {
-        // insert all messages from the user
-        messageHistory.messageHistory.forEach(message => {
-            dbQueryPool.execute('INSERT INTO messages (user_id, role, content, command_id, timestamp) VALUES (?, ?, ?, ?, ?);', [userID, message.role, message.content, message.commandID, message.timestamp]);
+        // insert all messages from the user, waiting for each one to finish
+        const promises = messageHistory.messageHistory.map(async message => {
+            await dbQueryPool.execute('INSERT INTO messages (user_id, role, content, command_id, timestamp) VALUES (?, ?, ?, ?, ?);', [userID, message.role, message.content, message.commandID, message.timestamp]);
+            console.log(`Saved message to database: ${JSON.stringify(message)}, user_id = ${userID}`);
         });
+        await Promise.all(promises);
+
     }
     catch (err) {
         console.error(err);
