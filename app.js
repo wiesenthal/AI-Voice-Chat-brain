@@ -2,10 +2,11 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import { json } from 'express';
-import { AskController } from './AskController.js';
-import { DisconnectController } from './DisconnectController.js';
-import { CancelCommandController } from './controllers/cancelCommandController.js';
-import { saveAllMessageHistories } from './utils/messageHistoryUtils.js';
+import AskController from './controllers/AskController.js';
+import DisconnectController from './controllers/DisconnectController.js';
+import CancelController from './controllers/CancelController.js';
+import SessionManager from './models/SessionManager.js';
+import { saveMessageHistoryToDB } from './utils/databaseUtils.js';
 
 dotenv.config();
 
@@ -22,9 +23,9 @@ class App {
     }
 
     configureRoutes() {
-        this.app.post('/ask', AskController);
-        this.app.post('/disconnect', DisconnectController);
-        this.app.post('/cancelCommand', CancelCommandController);
+        this.app.post('/ask', AskController.ask);
+        this.app.post('/disconnect', DisconnectController.disconnect);
+        this.app.post('/cancelCommand', CancelController.cancelAsk);
     }
 
     startServer() {
@@ -32,11 +33,22 @@ class App {
             console.log(`Server is running on port ${this.port}`);
         });
 
-        for (let signal of ["SIGTERM", "SIGINT"]) {
+        this.catchKillSignal();
+    }
+
+    catchKillSignal() {
+        for (let signal of ["SIGTERM", "SIGINT"])
+        {
             process.on(signal, () => {
                 console.log(`Received ${signal}, saving all message histories to DB`);
-                saveAllMessageHistories();
-                this.server.close((error) => {
+                for (let [userID, messageHistory] of Object.entries(SessionManager.getAllMessageHistories())) {
+                    if (!messageHistory || !userID) {
+                        console.log(`Tried to save but no message history found for userID ${userID}`);
+                        continue;
+                    }
+                    saveMessageHistoryToDB(userID, messageHistory);
+                }
+                server.close((error) => {
                     console.log('Process terminated');
                     process.exit(error ? 1 : 0);
                 });
